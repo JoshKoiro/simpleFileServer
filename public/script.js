@@ -426,26 +426,141 @@ class FileServer {
     }
     
     async viewPDF(url, filename) {
-        const iframe = document.createElement('iframe');
-        iframe.className = 'viewer-pdf';
-        iframe.src = url;
+        // Try to detect PDF support
+        const supportsPDF = this.checkPDFSupport();
         
-        iframe.onload = () => {
-            this.hideLoadingSpinner();
-            this.viewerContainer.innerHTML = '';
-            this.viewerContainer.appendChild(iframe);
+        if (supportsPDF) {
+            // Try iframe approach first
+            const iframe = document.createElement('iframe');
+            iframe.className = 'viewer-pdf';
+            iframe.src = url;
+            
+            let loaded = false;
+            
+            const loadTimeout = setTimeout(() => {
+                if (!loaded) {
+                    // Fallback to new tab approach
+                    this.fallbackPDFViewing(url, filename);
+                }
+            }, 3000);
+            
+            iframe.onload = () => {
+                loaded = true;
+                clearTimeout(loadTimeout);
+                
+                // Additional check for PDF support
+                try {
+                    // Some browsers load the iframe but can't display PDF content
+                    setTimeout(() => {
+                        if (iframe.contentDocument === null || 
+                            (iframe.contentWindow && iframe.contentWindow.location.href === 'about:blank')) {
+                            this.fallbackPDFViewing(url, filename);
+                        } else {
+                            this.hideLoadingSpinner();
+                            this.viewerContainer.innerHTML = '';
+                            this.viewerContainer.appendChild(iframe);
+                        }
+                    }, 1000);
+                } catch (e) {
+                    // Cross-origin restriction - fallback to new tab
+                    this.fallbackPDFViewing(url, filename);
+                }
+            };
+            
+            iframe.onerror = () => {
+                loaded = true;
+                clearTimeout(loadTimeout);
+                this.fallbackPDFViewing(url, filename);
+            };
+            
+        } else {
+            // Browser doesn't support PDF viewing
+            this.fallbackPDFViewing(url, filename);
+        }
+    }
+    
+    checkPDFSupport() {
+        // Check if browser has PDF plugin support
+        if (navigator.mimeTypes && navigator.mimeTypes['application/pdf']) {
+            return true;
+        }
+        
+        // Check for PDF.js support (Firefox)
+        if (typeof window.PDFViewerApplication !== 'undefined') {
+            return true;
+        }
+        
+        // Chrome usually supports PDF viewing
+        const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+        if (isChrome) {
+            return true;
+        }
+        
+        // Default to trying PDF support
+        return true;
+    }
+    
+    fallbackPDFViewing(url, filename) {
+        this.hideLoadingSpinner();
+        this.viewerContainer.innerHTML = '';
+        
+        // Create fallback UI
+        const fallbackContainer = document.createElement('div');
+        fallbackContainer.style.textAlign = 'center';
+        fallbackContainer.style.padding = '40px 20px';
+        fallbackContainer.style.color = '#333';
+        
+        const icon = document.createElement('div');
+        icon.style.fontSize = '4em';
+        icon.style.marginBottom = '20px';
+        icon.textContent = '📄';
+        
+        const title = document.createElement('h3');
+        title.style.marginBottom = '15px';
+        title.style.color = '#333';
+        title.textContent = 'PDF Viewer';
+        
+        const message = document.createElement('p');
+        message.style.marginBottom = '25px';
+        message.style.lineHeight = '1.5';
+        message.innerHTML = `
+            Your browser cannot display PDF files directly in this window.<br>
+            <strong>${this.escapeHtml(filename)}</strong>
+        `;
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.style.display = 'flex';
+        actionsDiv.style.gap = '15px';
+        actionsDiv.style.justifyContent = 'center';
+        
+        // Open in new tab button
+        const newTabBtn = document.createElement('button');
+        newTabBtn.className = 'btn btn-primary';
+        newTabBtn.innerHTML = '🔗 Open in New Tab';
+        newTabBtn.onclick = () => {
+            window.open(url, '_blank');
         };
         
-        iframe.onerror = () => {
-            this.showError('Failed to load PDF', 'The PDF file could not be loaded. Your browser may not support PDF viewing.');
+        // Download button
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'btn btn-secondary';
+        downloadBtn.innerHTML = '📥 Download PDF';
+        downloadBtn.onclick = () => {
+            const link = document.createElement('a');
+            link.href = `/api/download/${encodeURIComponent(filename)}?path=${encodeURIComponent(this.currentPath)}`;
+            link.download = filename;
+            link.click();
         };
         
-        // Fallback for browsers that don't support PDF viewing
-        setTimeout(() => {
-            if (iframe.contentDocument === null) {
-                this.showError('PDF viewing not supported', 'Your browser does not support viewing PDF files directly.');
-            }
-        }, 3000);
+        actionsDiv.appendChild(newTabBtn);
+        actionsDiv.appendChild(downloadBtn);
+        
+        fallbackContainer.appendChild(icon);
+        fallbackContainer.appendChild(title);
+        fallbackContainer.appendChild(message);
+        fallbackContainer.appendChild(actionsDiv);
+        
+        this.viewerContainer.appendChild(fallbackContainer);
     }
     
     async viewText(url, filename) {

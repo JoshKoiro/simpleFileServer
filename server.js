@@ -684,19 +684,30 @@ async function createZipWithProgress(jobId, folderPath, foldername, req) {
         const archive = archiver('zip', { zlib: { level: 6 } }); // Balanced compression
         
         let filesProcessed = 0;
+        let lastProgress = 0;
         
-        // Track archive progress
+        // Track archive progress with better progress calculation
         archive.on('entry', (entry) => {
-            filesProcessed++;
-            const progress = Math.round((filesProcessed / totalFiles) * 100);
-            const currentFile = entry.name;
-            
-            zipTracker.updateJob(jobId, {
-                progress,
-                filesProcessed,
-                currentFile,
-                status: 'zipping'
-            });
+            // Only count actual files, not directories
+            if (!entry.stats.isDirectory()) {
+                filesProcessed++;
+                
+                // Ensure progress never exceeds 100% and only increases
+                const rawProgress = totalFiles > 0 ? (filesProcessed / totalFiles) * 100 : 0;
+                const progress = Math.min(99, Math.max(lastProgress, Math.round(rawProgress))); // Cap at 99% until complete
+                lastProgress = progress;
+                
+                const currentFile = entry.name.length > 50 ? 
+                    '...' + entry.name.slice(-47) : 
+                    entry.name;
+                
+                zipTracker.updateJob(jobId, {
+                    progress,
+                    filesProcessed,
+                    currentFile,
+                    status: 'zipping'
+                });
+            }
         });
         
         // Handle completion
@@ -704,10 +715,11 @@ async function createZipWithProgress(jobId, folderPath, foldername, req) {
             zipTracker.updateJob(jobId, { 
                 zipPath, 
                 status: 'completed',
-                progress: 100,
+                progress: 100, // Always set to exactly 100% when complete
+                filesProcessed: totalFiles, // Ensure final count matches
                 currentFile: 'Completed'
             });
-            logger.log('SUCCESS', `ZIP job ${jobId} completed: ${archive.pointer()} bytes`, req);
+            logger.log('SUCCESS', `ZIP job ${jobId} completed: ${archive.pointer()} bytes, ${filesProcessed} files`, req);
         });
         
         // Handle errors
@@ -719,6 +731,15 @@ async function createZipWithProgress(jobId, folderPath, foldername, req) {
         output.on('error', (err) => {
             zipTracker.errorJob(jobId, err);
             logger.log('ERROR', `ZIP job ${jobId} output error`, req, err);
+        });
+        
+        // Handle archive warnings (but continue processing)
+        archive.on('warning', (err) => {
+            if (err.code === 'ENOENT') {
+                logger.log('WARN', `ZIP job ${jobId}: File not found during archiving: ${err.path}`, req);
+            } else {
+                logger.log('WARN', `ZIP job ${jobId}: Archive warning`, req, err);
+            }
         });
         
         // Pipe archive to output
