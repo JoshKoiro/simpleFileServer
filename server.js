@@ -15,7 +15,98 @@ function getValidatedPath(relativePath = '') {
 // Helper function to get relative path from base directory
 function getRelativePath(fullPath) {
     return path.relative(absoluteTargetDir, fullPath);
-}const express = require('express');
+}
+
+// Helper function to determine if file is viewable and get appropriate MIME type
+function getFileViewInfo(filename) {
+    const ext = path.extname(filename).toLowerCase();
+    const basename = path.basename(filename, ext);
+    
+    // Define viewable file types and their MIME types
+    const mimeTypes = {
+        // Images
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg', 
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+        '.ico': 'image/x-icon',
+        
+        // Videos
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogg': 'video/ogg',
+        '.avi': 'video/x-msvideo',
+        '.mov': 'video/quicktime',
+        '.wmv': 'video/x-ms-wmv',
+        
+        // Audio
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.aac': 'audio/aac',
+        '.flac': 'audio/flac',
+        
+        // Documents
+        '.pdf': 'application/pdf',
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+        '.markdown': 'text/markdown',
+        
+        // Code files
+        '.js': 'text/javascript',
+        '.html': 'text/html',
+        '.htm': 'text/html',
+        '.css': 'text/css',
+        '.json': 'application/json',
+        '.xml': 'application/xml',
+        '.py': 'text/x-python',
+        '.java': 'text/x-java-source',
+        '.cpp': 'text/x-c++src',
+        '.c': 'text/x-csrc',
+        '.h': 'text/x-chdr',
+        '.php': 'text/x-php',
+        '.rb': 'text/x-ruby',
+        '.go': 'text/x-go',
+        '.rs': 'text/x-rustsrc',
+        '.sh': 'text/x-shellscript',
+        '.sql': 'text/x-sql',
+        '.yaml': 'text/x-yaml',
+        '.yml': 'text/x-yaml',
+        '.toml': 'text/plain',
+        '.ini': 'text/plain',
+        '.cfg': 'text/plain',
+        '.conf': 'text/plain',
+        '.log': 'text/plain'
+    };
+    
+    const mimeType = mimeTypes[ext];
+    const isViewable = !!mimeType;
+    
+    // Determine the viewer type for frontend
+    let viewerType = 'unsupported';
+    if (mimeType) {
+        if (mimeType.startsWith('image/')) viewerType = 'image';
+        else if (mimeType.startsWith('video/')) viewerType = 'video';
+        else if (mimeType.startsWith('audio/')) viewerType = 'audio';
+        else if (mimeType === 'application/pdf') viewerType = 'pdf';
+        else if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') {
+            viewerType = 'text';
+        }
+    }
+    
+    return {
+        isViewable,
+        mimeType: mimeType || 'application/octet-stream',
+        viewerType,
+        extension: ext,
+        basename
+    };
+}
+
+const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
@@ -93,11 +184,19 @@ app.get('/api/files', async (req, res) => {
             files.map(async (file) => {
                 const filePath = path.join(fullCurrentPath, file);
                 const stats = await fs.stat(filePath);
+                
+                // Get file view info for non-directories
+                let viewInfo = { isViewable: false, viewerType: 'unsupported' };
+                if (!stats.isDirectory()) {
+                    viewInfo = getFileViewInfo(file);
+                }
+                
                 return {
                     name: file,
                     size: stats.size,
                     isDirectory: stats.isDirectory(),
-                    modified: stats.mtime.toISOString()
+                    modified: stats.mtime.toISOString(),
+                    ...viewInfo
                 };
             })
         );
@@ -109,7 +208,9 @@ app.get('/api/files', async (req, res) => {
                 size: 0,
                 isDirectory: true,
                 isParent: true,
-                modified: new Date().toISOString()
+                modified: new Date().toISOString(),
+                isViewable: false,
+                viewerType: 'unsupported'
             });
         }
         
@@ -117,6 +218,55 @@ app.get('/api/files', async (req, res) => {
     } catch (error) {
         console.error('Directory read error:', error);
         res.status(500).json({ error: 'Failed to read directory' });
+    }
+});
+
+// API endpoint for viewing files
+app.get('/api/view/:filename', (req, res) => {
+    try {
+        const filename = req.params.filename;
+        const currentPath = req.query.path || '';
+        const currentDir = getValidatedPath(currentPath);
+        const filePath = path.join(currentDir, filename);
+        
+        if (!fsSync.existsSync(filePath)) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+        
+        const stats = fsSync.statSync(filePath);
+        if (stats.isDirectory()) {
+            return res.status(400).json({ error: 'Cannot view directory' });
+        }
+        
+        // Get file view information
+        const viewInfo = getFileViewInfo(filename);
+        
+        if (!viewInfo.isViewable) {
+            return res.status(415).json({ 
+                error: 'File type not supported for viewing',
+                viewerType: 'unsupported',
+                extension: viewInfo.extension
+            });
+        }
+        
+        // Set appropriate content type
+        res.setHeader('Content-Type', viewInfo.mimeType);
+        res.setHeader('Content-Length', stats.size);
+        
+        // For text files, ensure UTF-8 encoding
+        if (viewInfo.viewerType === 'text') {
+            res.setHeader('Content-Type', `${viewInfo.mimeType}; charset=utf-8`);
+        }
+        
+        // Stream the file
+        const fileStream = fsSync.createReadStream(filePath);
+        fileStream.pipe(res);
+        
+        console.log(`File viewed: ${filePath} (${viewInfo.mimeType})`);
+        
+    } catch (error) {
+        console.error('File view error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 

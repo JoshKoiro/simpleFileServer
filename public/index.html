@@ -37,6 +37,33 @@
         </div>
     </div>
 
+    <!-- File Viewer Modal -->
+    <div id="fileViewerModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">File Viewer</h3>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="viewerContainer">
+                    <!-- Content will be dynamically inserted here -->
+                </div>
+                <div id="loadingSpinner" class="spinner" style="display: none;">
+                    <div class="spinner-circle"></div>
+                    <p>Loading file...</p>
+                </div>
+                <div id="errorMessage" class="error-message" style="display: none;">
+                    <div class="error-icon">⚠️</div>
+                    <h4>Cannot view this file</h4>
+                    <p id="errorText">This file type is not supported for viewing.</p>
+                    <div class="error-actions">
+                        <button id="downloadInsteadBtn" class="btn btn-primary">Download Instead</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>

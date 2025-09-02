@@ -9,8 +9,21 @@ class FileServer {
         this.uploadStatus = document.getElementById('uploadStatus');
         this.uploadContent = document.querySelector('.upload-content');
         
+        // Modal elements
+        this.modal = document.getElementById('fileViewerModal');
+        this.modalClose = document.getElementById('modalClose');
+        this.modalTitle = document.getElementById('modalTitle');
+        this.viewerContainer = document.getElementById('viewerContainer');
+        this.loadingSpinner = document.getElementById('loadingSpinner');
+        this.errorMessage = document.getElementById('errorMessage');
+        this.errorText = document.getElementById('errorText');
+        this.downloadInsteadBtn = document.getElementById('downloadInsteadBtn');
+        
         // Navigation state
         this.currentPath = '';
+        
+        // Current viewed file info (for download fallback)
+        this.currentViewedFile = null;
         
         this.init();
     }
@@ -19,6 +32,7 @@ class FileServer {
         this.loadDirectoryInfo();
         this.loadFiles();
         this.setupEventListeners();
+        this.setupModalEventListeners();
     }
     
     setupEventListeners() {
@@ -58,6 +72,38 @@ class FileServer {
         // Prevent default drag behavior on document
         document.addEventListener('dragover', (e) => e.preventDefault());
         document.addEventListener('drop', (e) => e.preventDefault());
+    }
+    
+    setupModalEventListeners() {
+        // Close modal when clicking close button
+        this.modalClose.addEventListener('click', () => {
+            this.closeModal();
+        });
+        
+        // Close modal when clicking outside content
+        this.modal.addEventListener('click', (e) => {
+            if (e.target === this.modal) {
+                this.closeModal();
+            }
+        });
+        
+        // Close modal with escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.modal.classList.contains('show')) {
+                this.closeModal();
+            }
+        });
+        
+        // Download instead button
+        this.downloadInsteadBtn.addEventListener('click', () => {
+            if (this.currentViewedFile) {
+                const link = document.createElement('a');
+                link.href = `/api/download/${encodeURIComponent(this.currentViewedFile.name)}?path=${encodeURIComponent(this.currentPath)}`;
+                link.download = this.currentViewedFile.name;
+                link.click();
+                this.closeModal();
+            }
+        });
     }
     
     async loadDirectoryInfo() {
@@ -111,16 +157,29 @@ class FileServer {
         const size = file.isDirectory ? (isParent ? 'Parent Directory' : 'Directory') : this.formatFileSize(file.size);
         const date = isParent ? '' : new Date(file.modified).toLocaleDateString();
         
-        let downloadButton = '';
+        let actions = '';
         let doubleClickHandler = '';
         
         if (isParent) {
             doubleClickHandler = `ondblclick="window.fileServer.navigateUp()"`;
         } else if (file.isDirectory) {
-            downloadButton = `<button class="download-btn" onclick="window.fileServer.downloadFolder('${this.escapeHtml(file.name)}')">📦 Download ZIP</button>`;
+            actions = `
+                <div class="file-actions">
+                    <button class="action-btn download-btn" onclick="window.fileServer.downloadFolder('${this.escapeHtml(file.name)}')">📦 Download ZIP</button>
+                </div>
+            `;
             doubleClickHandler = `ondblclick="window.fileServer.navigateInto('${this.escapeHtml(file.name)}')"`;
         } else {
-            downloadButton = `<a href="/api/download/${encodeURIComponent(file.name)}?path=${encodeURIComponent(this.currentPath)}" class="download-btn" download>⬇️ Download</a>`;
+            // For files, show view button if viewable, always show download
+            const viewButton = file.isViewable ? 
+                `<button class="action-btn view-btn" onclick="window.fileServer.viewFile('${this.escapeHtml(file.name)}', '${file.viewerType}')">👁️ View</button>` : '';
+            
+            actions = `
+                <div class="file-actions">
+                    ${viewButton}
+                    <a href="/api/download/${encodeURIComponent(file.name)}?path=${encodeURIComponent(this.currentPath)}" class="action-btn download-btn" download>⬇️ Download</a>
+                </div>
+            `;
         }
         
         return `
@@ -132,7 +191,7 @@ class FileServer {
                         <div class="file-meta">${size}${date ? ' • ' + date : ''}</div>
                     </div>
                 </div>
-                ${downloadButton}
+                ${actions}
             </div>
         `;
     }
@@ -145,11 +204,13 @@ class FileServer {
             'xls': '📊', 'xlsx': '📊',
             'ppt': '📈', 'pptx': '📈',
             'txt': '📃',
-            'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'svg': '🖼️',
-            'mp4': '🎬', 'avi': '🎬', 'mov': '🎬',
-            'mp3': '🎵', 'wav': '🎵', 'flac': '🎵',
+            'md': '📃', 'markdown': '📃',
+            'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'svg': '🖼️', 'webp': '🖼️',
+            'mp4': '🎬', 'avi': '🎬', 'mov': '🎬', 'webm': '🎬',
+            'mp3': '🎵', 'wav': '🎵', 'flac': '🎵', 'aac': '🎵',
             'zip': '🗜️', 'rar': '🗜️', '7z': '🗜️',
-            'js': '💻', 'html': '💻', 'css': '💻', 'py': '💻', 'java': '💻',
+            'js': '💻', 'html': '💻', 'css': '💻', 'py': '💻', 'java': '💻', 'cpp': '💻', 'c': '💻',
+            'json': '📋', 'xml': '📋', 'yaml': '📋', 'yml': '📋'
         };
         return iconMap[ext] || '📋';
     }
@@ -166,6 +227,201 @@ class FileServer {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    // File viewing methods
+    async viewFile(filename, viewerType) {
+        this.currentViewedFile = { name: filename, viewerType };
+        this.openModal();
+        this.showLoadingSpinner();
+        this.modalTitle.textContent = filename;
+        
+        try {
+            const viewUrl = `/api/view/${encodeURIComponent(filename)}?path=${encodeURIComponent(this.currentPath)}`;
+            
+            // Handle different viewer types
+            switch (viewerType) {
+                case 'image':
+                    await this.viewImage(viewUrl, filename);
+                    break;
+                case 'video':
+                    await this.viewVideo(viewUrl, filename);
+                    break;
+                case 'audio':
+                    await this.viewAudio(viewUrl, filename);
+                    break;
+                case 'pdf':
+                    await this.viewPDF(viewUrl, filename);
+                    break;
+                case 'text':
+                    await this.viewText(viewUrl, filename);
+                    break;
+                default:
+                    this.showError('Unsupported file type', 'This file type cannot be viewed in the browser.');
+            }
+        } catch (error) {
+            console.error('Error viewing file:', error);
+            this.showError('Failed to load file', error.message || 'An error occurred while loading the file.');
+        }
+    }
+    
+    async viewImage(url, filename) {
+        const img = document.createElement('img');
+        img.className = 'viewer-image';
+        img.alt = filename;
+        
+        img.onload = () => {
+            this.hideLoadingSpinner();
+            this.viewerContainer.innerHTML = '';
+            this.viewerContainer.appendChild(img);
+        };
+        
+        img.onerror = () => {
+            this.showError('Failed to load image', 'The image file could not be loaded.');
+        };
+        
+        img.src = url;
+    }
+    
+    async viewVideo(url, filename) {
+        const video = document.createElement('video');
+        video.className = 'viewer-video';
+        video.controls = true;
+        video.preload = 'metadata';
+        
+        video.onloadedmetadata = () => {
+            this.hideLoadingSpinner();
+            this.viewerContainer.innerHTML = '';
+            this.viewerContainer.appendChild(video);
+        };
+        
+        video.onerror = () => {
+            this.showError('Failed to load video', 'The video file could not be loaded or played.');
+        };
+        
+        video.src = url;
+    }
+    
+    async viewAudio(url, filename) {
+        const audio = document.createElement('audio');
+        audio.className = 'viewer-audio';
+        audio.controls = true;
+        audio.preload = 'metadata';
+        
+        audio.onloadedmetadata = () => {
+            this.hideLoadingSpinner();
+            this.viewerContainer.innerHTML = '';
+            
+            // Create a container for audio with filename
+            const container = document.createElement('div');
+            container.style.textAlign = 'center';
+            container.style.padding = '20px';
+            
+            const title = document.createElement('h4');
+            title.textContent = filename;
+            title.style.marginBottom = '20px';
+            title.style.color = '#333';
+            
+            container.appendChild(title);
+            container.appendChild(audio);
+            this.viewerContainer.appendChild(container);
+        };
+        
+        audio.onerror = () => {
+            this.showError('Failed to load audio', 'The audio file could not be loaded or played.');
+        };
+        
+        audio.src = url;
+    }
+    
+    async viewPDF(url, filename) {
+        const iframe = document.createElement('iframe');
+        iframe.className = 'viewer-pdf';
+        iframe.src = url;
+        
+        iframe.onload = () => {
+            this.hideLoadingSpinner();
+            this.viewerContainer.innerHTML = '';
+            this.viewerContainer.appendChild(iframe);
+        };
+        
+        iframe.onerror = () => {
+            this.showError('Failed to load PDF', 'The PDF file could not be loaded. Your browser may not support PDF viewing.');
+        };
+        
+        // Fallback for browsers that don't support PDF viewing
+        setTimeout(() => {
+            if (iframe.contentDocument === null) {
+                this.showError('PDF viewing not supported', 'Your browser does not support viewing PDF files directly.');
+            }
+        }, 3000);
+    }
+    
+    async viewText(url, filename) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const text = await response.text();
+            const pre = document.createElement('pre');
+            pre.className = 'viewer-text';
+            
+            // Add syntax highlighting class for code files
+            const ext = filename.split('.').pop().toLowerCase();
+            const codeExtensions = ['js', 'html', 'css', 'py', 'java', 'cpp', 'c', 'php', 'rb', 'go', 'rs', 'sh', 'sql'];
+            if (codeExtensions.includes(ext)) {
+                pre.classList.add('code');
+            }
+            
+            pre.textContent = text;
+            
+            this.hideLoadingSpinner();
+            this.viewerContainer.innerHTML = '';
+            this.viewerContainer.appendChild(pre);
+            
+        } catch (error) {
+            this.showError('Failed to load text file', error.message || 'The text file could not be loaded.');
+        }
+    }
+    
+    openModal() {
+        this.modal.classList.add('show');
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    }
+    
+    closeModal() {
+        this.modal.classList.remove('show');
+        document.body.style.overflow = ''; // Restore scrolling
+        
+        // Clean up viewer content
+        this.viewerContainer.innerHTML = '';
+        this.hideLoadingSpinner();
+        this.hideError();
+        this.currentViewedFile = null;
+    }
+    
+    showLoadingSpinner() {
+        this.loadingSpinner.style.display = 'flex';
+        this.errorMessage.style.display = 'none';
+        this.viewerContainer.innerHTML = '';
+    }
+    
+    hideLoadingSpinner() {
+        this.loadingSpinner.style.display = 'none';
+    }
+    
+    showError(title, message) {
+        this.hideLoadingSpinner();
+        this.viewerContainer.innerHTML = '';
+        this.errorText.textContent = message;
+        this.errorMessage.querySelector('h4').textContent = title;
+        this.errorMessage.style.display = 'flex';
+    }
+    
+    hideError() {
+        this.errorMessage.style.display = 'none';
     }
     
     async uploadFiles(files) {

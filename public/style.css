@@ -39,6 +39,12 @@ body {
     backdrop-filter: blur(10px);
 }
 
+.navigation-hint {
+    margin-top: 10px;
+    font-size: 0.9em;
+    opacity: 0.8;
+}
+
 .upload-zone {
     background: rgba(255, 255, 255, 0.95);
     border: 3px dashed #ddd;
@@ -167,6 +173,40 @@ body {
     font-size: 0.85em;
 }
 
+.file-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.action-btn {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.action-btn.view-btn {
+    background: linear-gradient(135deg, #17a2b8, #138496);
+}
+
+.action-btn.view-btn:hover {
+    box-shadow: 0 4px 12px rgba(23, 162, 184, 0.4);
+}
+
 .download-btn {
     background: linear-gradient(135deg, #667eea, #764ba2);
     color: white;
@@ -225,6 +265,236 @@ button.download-btn:hover {
     background: #dc3545;
 }
 
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(5px);
+}
+
+.modal.show {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: modalFadeIn 0.3s ease;
+}
+
+@keyframes modalFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.modal-content {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 90vw;
+    max-height: 90vh;
+    width: auto;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: modalSlideIn 0.3s ease;
+}
+
+@keyframes modalSlideIn {
+    from { transform: translateY(-50px) scale(0.95); }
+    to { transform: translateY(0) scale(1); }
+}
+
+.modal-header {
+    padding: 20px;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8f9fa;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-weight: 500;
+    color: #333;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: #aaa;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.modal-close:hover {
+    background: #e0e0e0;
+    color: #333;
+}
+
+.modal-body {
+    flex: 1;
+    padding: 0;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+}
+
+#viewerContainer {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+}
+
+/* Viewer Type Specific Styles */
+.viewer-image {
+    max-width: 100%;
+    max-height: 80vh;
+    object-fit: contain;
+    border-radius: 8px;
+}
+
+.viewer-video {
+    max-width: 100%;
+    max-height: 80vh;
+    border-radius: 8px;
+}
+
+.viewer-audio {
+    width: 100%;
+    max-width: 500px;
+    margin: 20px;
+}
+
+.viewer-pdf {
+    width: 100%;
+    height: 80vh;
+    border: none;
+    border-radius: 8px;
+}
+
+.viewer-text {
+    width: 100%;
+    height: 80vh;
+    max-width: 1000px;
+    padding: 20px;
+    overflow: auto;
+    background: #f8f9fa;
+    border-radius: 8px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: #333;
+}
+
+.viewer-text.code {
+    background: #282c34;
+    color: #abb2bf;
+}
+
+/* Loading Spinner */
+.spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+}
+
+.spinner-circle {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #e0e0e0;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 15px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spinner p {
+    color: #666;
+    font-size: 14px;
+}
+
+/* Error Message */
+.error-message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    text-align: center;
+    color: #666;
+}
+
+.error-icon {
+    font-size: 4em;
+    margin-bottom: 20px;
+    opacity: 0.7;
+}
+
+.error-message h4 {
+    margin-bottom: 10px;
+    color: #333;
+    font-weight: 500;
+}
+
+.error-message p {
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.error-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
 @media (max-width: 600px) {
     .container {
         padding: 15px;
@@ -244,7 +514,27 @@ button.download-btn:hover {
         gap: 10px;
     }
     
-    .download-btn {
+    .file-actions {
         align-self: flex-end;
+    }
+    
+    .modal-content {
+        max-width: 95vw;
+        max-height: 95vh;
+        margin: 10px;
+    }
+    
+    .modal-body {
+        min-height: 200px;
+    }
+    
+    .viewer-text {
+        height: 60vh;
+        padding: 15px;
+        font-size: 12px;
+    }
+    
+    .viewer-pdf {
+        height: 60vh;
     }
 }
