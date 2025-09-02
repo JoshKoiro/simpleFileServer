@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple File Server</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>📁 File Server</h1>
+            <p class="directory-path" id="directoryPath">Loading...</p>
+            <p class="navigation-hint">💡 Double-click folders to navigate • Double-click ".." to go back</p>
+        </header>
+
+        <div class="upload-zone" id="uploadZone">
+            <div class="upload-content">
+                <div class="upload-icon">📤</div>
+                <h3>Drag & Drop Files Here</h3>
+                <p>Or click to select files</p>
+                <input type="file" id="fileInput" multiple hidden>
+            </div>
+            <div class="upload-progress" id="uploadProgress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p id="uploadStatus">Uploading...</p>
+            </div>
+        </div>
+
+        <div class="files-section">
+            <h2>Files</h2>
+            <div class="files-list" id="filesList">
+                <div class="loading">Loading files...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
