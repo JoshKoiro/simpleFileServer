@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js ."
+    "dev": "node server.js .",
+    "yeet": "node node_modules/code-context-yeeter/yeetCode.js"
   },
   "keywords": [
     "file-server",
