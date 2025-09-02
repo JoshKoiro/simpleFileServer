@@ -1,3 +1,195 @@
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const archiver = require('archiver');
+const { EventEmitter } = require('events');
+
+// Enhanced logging system
+class Logger {
+    constructor() {
+        this.logFile = path.join(__dirname, 'file-server.log');
+        this.maxLogSize = 50 * 1024 * 1024; // 50MB
+        this.logBuffer = [];
+        this.maxBufferSize = 1000; // Keep last 1000 log entries in memory
+        this.initLogFile();
+    }
+    
+    async initLogFile() {
+        try {
+            // Create log file if it doesn't exist
+            if (!fsSync.existsSync(this.logFile)) {
+                await fs.writeFile(this.logFile, '');
+            }
+            
+            // Check file size and rotate if needed
+            const stats = await fs.stat(this.logFile);
+            if (stats.size > this.maxLogSize) {
+                await this.rotateLog();
+            }
+            
+            this.log('SYSTEM', 'Logger initialized successfully');
+        } catch (error) {
+            console.error('Failed to initialize logger:', error);
+        }
+    }
+    
+    async rotateLog() {
+        try {
+            const backupFile = this.logFile + '.old';
+            await fs.copyFile(this.logFile, backupFile);
+            await fs.writeFile(this.logFile, '');
+            console.log('Log file rotated');
+        } catch (error) {
+            console.error('Failed to rotate log:', error);
+        }
+    }
+    
+    async log(level, message, req = null, error = null) {
+        const timestamp = new Date().toISOString();
+        const ip = req ? (req.ip || req.connection?.remoteAddress || 'unknown') : 'system';
+        const userAgent = req ? (req.get('User-Agent') || 'unknown') : 'system';
+        const method = req ? req.method : '';
+        const url = req ? req.originalUrl || req.url : '';
+        
+        const logEntry = {
+            timestamp,
+            level,
+            ip,
+            method,
+            url,
+            userAgent,
+            message,
+            error: error ? {
+                message: error.message,
+                stack: error.stack
+            } : null
+        };
+        
+        // Add to memory buffer
+        this.logBuffer.push(logEntry);
+        if (this.logBuffer.length > this.maxBufferSize) {
+            this.logBuffer.shift();
+        }
+        
+        // Format for console
+        const consoleMessage = `[${timestamp}] [${level}] [${ip}] ${method} ${url} - ${message}${error ? ` - ERROR: ${error.message}` : ''}`;
+        
+        // Console output with colors
+        switch (level) {
+            case 'ERROR':
+                console.log('\x1b[31m%s\x1b[0m', consoleMessage); // Red
+                break;
+            case 'WARN':
+                console.log('\x1b[33m%s\x1b[0m', consoleMessage); // Yellow
+                break;
+            case 'SUCCESS':
+                console.log('\x1b[32m%s\x1b[0m', consoleMessage); // Green
+                break;
+            case 'INFO':
+                console.log('\x1b[36m%s\x1b[0m', consoleMessage); // Cyan
+                break;
+            default:
+                console.log(consoleMessage);
+        }
+        
+        // Write to file
+        try {
+            const fileEntry = JSON.stringify(logEntry) + '\n';
+            await fs.appendFile(this.logFile, fileEntry);
+        } catch (error) {
+            console.error('Failed to write to log file:', error);
+        }
+    }
+    
+    getRecentLogs(limit = 100) {
+        return this.logBuffer.slice(-limit);
+    }
+}
+
+// ZIP progress tracking
+class ZipProgressTracker extends EventEmitter {
+    constructor() {
+        super();
+        this.activeJobs = new Map();
+    }
+    
+    createJob(jobId, folderPath) {
+        const job = {
+            id: jobId,
+            folderPath,
+            startTime: Date.now(),
+            progress: 0,
+            status: 'initializing',
+            filesProcessed: 0,
+            totalFiles: 0,
+            currentFile: '',
+            error: null
+        };
+        
+        this.activeJobs.set(jobId, job);
+        return job;
+    }
+    
+    updateJob(jobId, updates) {
+        const job = this.activeJobs.get(jobId);
+        if (job) {
+            Object.assign(job, updates);
+            this.emit('progress', job);
+        }
+    }
+    
+    completeJob(jobId) {
+        const job = this.activeJobs.get(jobId);
+        if (job) {
+            job.status = 'completed';
+            job.progress = 100;
+            this.emit('progress', job);
+            // Keep job for 30 seconds for final status check
+            setTimeout(() => this.activeJobs.delete(jobId), 30000);
+        }
+    }
+    
+    errorJob(jobId, error) {
+        const job = this.activeJobs.get(jobId);
+        if (job) {
+            job.status = 'error';
+            job.error = error.message;
+            this.emit('progress', job);
+            setTimeout(() => this.activeJobs.delete(jobId), 30000);
+        }
+    }
+    
+    getJob(jobId) {
+        return this.activeJobs.get(jobId);
+    }
+}
+
+// Helper function to count files in directory recursively
+async function countFilesRecursive(dirPath) {
+    let count = 0;
+    
+    try {
+        const items = await fs.readdir(dirPath);
+        
+        for (const item of items) {
+            const itemPath = path.join(dirPath, item);
+            const stats = await fs.stat(itemPath);
+            
+            if (stats.isDirectory()) {
+                count += await countFilesRecursive(itemPath);
+            } else {
+                count++;
+            }
+        }
+    } catch (error) {
+        // Ignore errors for individual files/folders
+    }
+    
+    return count;
+}
+
 // Helper function to resolve and validate directory paths
 function getValidatedPath(relativePath = '') {
     // Remove leading/trailing slashes and resolve
@@ -106,13 +298,6 @@ function getFileViewInfo(filename) {
     };
 }
 
-const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs').promises;
-const fsSync = require('fs');
-const archiver = require('archiver');
-
 // Get directory from command line arguments
 const targetDir = process.argv[2];
 
@@ -135,26 +320,45 @@ if (!fsSync.statSync(absoluteTargetDir).isDirectory()) {
     process.exit(1);
 }
 
+// Initialize components
 const app = express();
 const PORT = 8000;
+const logger = new Logger();
+const zipTracker = new ZipProgressTracker();
 
-// Add detailed request logging middleware
+// Trust proxy for accurate IP addresses
+app.set('trust proxy', true);
+
+// Enhanced request logging middleware
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - Headers: ${JSON.stringify(req.headers.accept)}`);
+    const startTime = Date.now();
+    
+    // Log request
+    logger.log('INFO', `${req.method} ${req.originalUrl} - Request started`, req);
+    
+    // Override res.end to log response
+    const originalEnd = res.end;
+    res.end = function(...args) {
+        const duration = Date.now() - startTime;
+        const statusCode = res.statusCode;
+        const statusLevel = statusCode >= 400 ? 'ERROR' : statusCode >= 300 ? 'WARN' : 'SUCCESS';
+        
+        logger.log(statusLevel, `${req.method} ${req.originalUrl} - ${statusCode} (${duration}ms)`, req);
+        originalEnd.apply(res, args);
+    };
+    
     next();
 });
 
 // Explicitly handle root route BEFORE static middleware
 app.get('/', (req, res) => {
     const indexPath = path.join(__dirname, 'public', 'index.html');
-    console.log('ROOT REQUEST - Serving index.html from:', indexPath);
-    console.log('File exists:', fsSync.existsSync(indexPath));
+    logger.log('INFO', 'Serving root index.html', req);
+    
     res.sendFile(indexPath, (err) => {
         if (err) {
-            console.error('Error serving index.html:', err);
+            logger.log('ERROR', 'Failed to serve index.html', req, err);
             res.status(500).send('Error serving index.html');
-        } else {
-            console.log('Successfully sent index.html');
         }
     });
 });
@@ -164,13 +368,9 @@ app.use(express.static(path.join(__dirname, 'public'), {
     dotfiles: 'ignore',
     etag: false,
     extensions: ['htm', 'html'],
-    index: false, // Disable automatic index serving since we handle it explicitly
+    index: false,
     maxAge: '1d',
-    redirect: false,
-    setHeaders: function (res, path, stat) {
-        console.log('Static file served:', path);
-        res.set('x-timestamp', Date.now());
-    }
+    redirect: false
 }));
 
 // API endpoint to get directory contents
@@ -178,6 +378,8 @@ app.get('/api/files', async (req, res) => {
     try {
         const currentPath = req.query.path || '';
         const fullCurrentPath = getValidatedPath(currentPath);
+        
+        logger.log('INFO', `Listing directory: ${fullCurrentPath}`, req);
         
         const files = await fs.readdir(fullCurrentPath);
         const fileDetails = await Promise.all(
@@ -214,9 +416,10 @@ app.get('/api/files', async (req, res) => {
             });
         }
         
+        logger.log('SUCCESS', `Listed ${fileDetails.length} items in directory`, req);
         res.json(fileDetails);
     } catch (error) {
-        console.error('Directory read error:', error);
+        logger.log('ERROR', 'Failed to list directory contents', req, error);
         res.status(500).json({ error: 'Failed to read directory' });
     }
 });
@@ -230,11 +433,13 @@ app.get('/api/view/:filename', (req, res) => {
         const filePath = path.join(currentDir, filename);
         
         if (!fsSync.existsSync(filePath)) {
+            logger.log('WARN', `File not found for viewing: ${filePath}`, req);
             return res.status(404).json({ error: 'File not found' });
         }
         
         const stats = fsSync.statSync(filePath);
         if (stats.isDirectory()) {
+            logger.log('WARN', `Attempted to view directory: ${filePath}`, req);
             return res.status(400).json({ error: 'Cannot view directory' });
         }
         
@@ -242,6 +447,7 @@ app.get('/api/view/:filename', (req, res) => {
         const viewInfo = getFileViewInfo(filename);
         
         if (!viewInfo.isViewable) {
+            logger.log('WARN', `Unsupported file type for viewing: ${filename} (${viewInfo.extension})`, req);
             return res.status(415).json({ 
                 error: 'File type not supported for viewing',
                 viewerType: 'unsupported',
@@ -262,10 +468,10 @@ app.get('/api/view/:filename', (req, res) => {
         const fileStream = fsSync.createReadStream(filePath);
         fileStream.pipe(res);
         
-        console.log(`File viewed: ${filePath} (${viewInfo.mimeType})`);
+        logger.log('SUCCESS', `File viewed: ${filename} (${viewInfo.mimeType}, ${stats.size} bytes)`, req);
         
     } catch (error) {
-        console.error('File view error:', error);
+        logger.log('ERROR', 'Error serving file for viewing', req, error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -274,7 +480,11 @@ app.get('/api/view/:filename', (req, res) => {
 app.post('/api/upload', (req, res) => {
     // Create a dynamic multer instance for this request
     const tempUpload = multer({
-        storage: multer.memoryStorage() // Store files in memory temporarily
+        storage: multer.memoryStorage(),
+        limits: {
+            fileSize: 100 * 1024 * 1024, // 100MB limit per file
+            files: 50
+        }
     }).fields([
         { name: 'files', maxCount: 50 },
         { name: 'currentPath', maxCount: 1 }
@@ -282,12 +492,13 @@ app.post('/api/upload', (req, res) => {
     
     tempUpload(req, res, async (err) => {
         if (err) {
-            console.error('Multer error:', err);
+            logger.log('ERROR', 'File upload processing failed', req, err);
             return res.status(500).json({ error: 'Upload processing failed: ' + err.message });
         }
         
         try {
             if (!req.files || !req.files.files || req.files.files.length === 0) {
+                logger.log('WARN', 'No files provided in upload request', req);
                 return res.status(400).json({ error: 'No files uploaded' });
             }
             
@@ -295,15 +506,18 @@ app.post('/api/upload', (req, res) => {
             const currentPath = req.body.currentPath || '';
             const uploadDir = getValidatedPath(currentPath);
             
-            console.log(`Uploading to directory: ${uploadDir}`);
+            logger.log('INFO', `Starting upload of ${req.files.files.length} files to: ${uploadDir}`, req);
             
             // Ensure upload directory exists
             if (!fsSync.existsSync(uploadDir)) {
+                logger.log('ERROR', `Upload directory does not exist: ${uploadDir}`, req);
                 return res.status(500).json({ error: `Upload directory does not exist: ${uploadDir}` });
             }
             
             // Save files to the target directory
             const savedFiles = [];
+            const totalSize = req.files.files.reduce((sum, file) => sum + file.size, 0);
+            
             for (const file of req.files.files) {
                 const filePath = path.join(uploadDir, file.originalname);
                 await fs.writeFile(filePath, file.buffer);
@@ -311,8 +525,10 @@ app.post('/api/upload', (req, res) => {
                     name: file.originalname,
                     size: file.size
                 });
-                console.log(`Saved file: ${filePath}`);
+                logger.log('SUCCESS', `Uploaded file: ${file.originalname} (${file.size} bytes)`, req);
             }
+            
+            logger.log('SUCCESS', `Upload completed: ${savedFiles.length} files, ${totalSize} bytes total`, req);
             
             res.json({ 
                 message: 'Files uploaded successfully',
@@ -320,7 +536,7 @@ app.post('/api/upload', (req, res) => {
             });
             
         } catch (error) {
-            console.error('File save error:', error);
+            logger.log('ERROR', 'Failed to save uploaded files', req, error);
             res.status(500).json({ error: 'Failed to save files: ' + error.message });
         }
     });
@@ -335,22 +551,26 @@ app.get('/api/download/:filename', (req, res) => {
         const filePath = path.join(currentDir, filename);
         
         if (!fsSync.existsSync(filePath)) {
+            logger.log('WARN', `File not found for download: ${filePath}`, req);
             return res.status(404).json({ error: 'File not found' });
         }
         
         const stats = fsSync.statSync(filePath);
         if (stats.isDirectory()) {
+            logger.log('WARN', `Attempted to download directory as file: ${filePath}`, req);
             return res.status(400).json({ error: 'Use /api/download-folder/ for directories' });
         }
         
+        logger.log('SUCCESS', `File download started: ${filename} (${stats.size} bytes)`, req);
         res.download(filePath, filename);
     } catch (error) {
+        logger.log('ERROR', 'File download failed', req, error);
         res.status(500).json({ error: error.message });
     }
 });
 
-// API endpoint for folder download (as ZIP)
-app.get('/api/download-folder/:foldername', (req, res) => {
+// API endpoint to start folder download (returns job ID)
+app.post('/api/start-zip/:foldername', async (req, res) => {
     try {
         const foldername = req.params.foldername;
         const currentPath = req.query.path || '';
@@ -358,55 +578,163 @@ app.get('/api/download-folder/:foldername', (req, res) => {
         const folderPath = path.join(currentDir, foldername);
         
         if (!fsSync.existsSync(folderPath)) {
+            logger.log('WARN', `Folder not found for ZIP: ${folderPath}`, req);
             return res.status(404).json({ error: 'Folder not found' });
         }
         
         const stats = fsSync.statSync(folderPath);
         if (!stats.isDirectory()) {
+            logger.log('WARN', `Attempted to ZIP non-directory: ${folderPath}`, req);
             return res.status(400).json({ error: 'Path is not a directory' });
         }
         
-        // Set response headers for zip download
-        const zipFilename = `${foldername}.zip`;
-        res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+        // Generate unique job ID
+        const jobId = `zip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Create zip archive
-        const archive = archiver('zip', {
-            zlib: { level: 9 } // Maximum compression
-        });
+        // Create progress tracking job
+        const job = zipTracker.createJob(jobId, folderPath);
         
-        // Handle archive errors
-        archive.on('error', (err) => {
-            console.error('Archive error:', err);
-            if (!res.headersSent) {
-                res.status(500).json({ error: 'Failed to create archive' });
-            }
-        });
+        logger.log('INFO', `ZIP job started: ${jobId} for folder ${foldername}`, req);
         
-        // Handle archive warnings
-        archive.on('warning', (err) => {
-            if (err.code === 'ENOENT') {
-                console.warn('Archive warning:', err);
-            } else {
-                console.error('Archive error:', err);
-            }
-        });
+        // Start ZIP creation in background (don't await)
+        createZipWithProgress(jobId, folderPath, foldername, req);
         
-        // Pipe archive data to response
-        archive.pipe(res);
+        res.json({ jobId, status: 'started' });
         
-        // Add the entire directory to the zip
-        archive.directory(folderPath, false);
-        
-        // Finalize the archive
-        archive.finalize();
-        
-        console.log(`Creating ZIP archive for folder: ${folderPath}`);
     } catch (error) {
+        logger.log('ERROR', 'Failed to start ZIP job', req, error);
         res.status(500).json({ error: error.message });
     }
 });
+
+// API endpoint to get ZIP job progress
+app.get('/api/zip-progress/:jobId', (req, res) => {
+    const jobId = req.params.jobId;
+    const job = zipTracker.getJob(jobId);
+    
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    res.json(job);
+});
+
+// API endpoint to download completed ZIP
+app.get('/api/download-zip/:jobId', (req, res) => {
+    const jobId = req.params.jobId;
+    const job = zipTracker.getJob(jobId);
+    
+    if (!job) {
+        logger.log('WARN', `ZIP job not found: ${jobId}`, req);
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    if (job.status !== 'completed') {
+        logger.log('WARN', `ZIP job not completed: ${jobId} (status: ${job.status})`, req);
+        return res.status(400).json({ error: 'Job not completed' });
+    }
+    
+    const zipPath = job.zipPath;
+    if (!fsSync.existsSync(zipPath)) {
+        logger.log('ERROR', `ZIP file not found: ${zipPath}`, req);
+        return res.status(404).json({ error: 'ZIP file not found' });
+    }
+    
+    const filename = path.basename(zipPath);
+    logger.log('SUCCESS', `ZIP download started: ${filename}`, req);
+    
+    res.download(zipPath, filename, (err) => {
+        if (err) {
+            logger.log('ERROR', 'ZIP download failed', req, err);
+        } else {
+            // Clean up ZIP file after download
+            setTimeout(() => {
+                fsSync.unlink(zipPath, (unlinkErr) => {
+                    if (unlinkErr) {
+                        logger.log('WARN', `Failed to cleanup ZIP file: ${zipPath}`, null, unlinkErr);
+                    } else {
+                        logger.log('INFO', `ZIP file cleaned up: ${zipPath}`, null);
+                    }
+                });
+            }, 5000); // Wait 5 seconds before cleanup
+        }
+    });
+});
+
+// Function to create ZIP with progress tracking
+async function createZipWithProgress(jobId, folderPath, foldername, req) {
+    const tempDir = path.join(__dirname, 'temp');
+    const zipPath = path.join(tempDir, `${foldername}_${Date.now()}.zip`);
+    
+    try {
+        // Ensure temp directory exists
+        if (!fsSync.existsSync(tempDir)) {
+            await fs.mkdir(tempDir, { recursive: true });
+        }
+        
+        // Count total files for progress calculation
+        zipTracker.updateJob(jobId, { status: 'counting', currentFile: 'Counting files...' });
+        const totalFiles = await countFilesRecursive(folderPath);
+        zipTracker.updateJob(jobId, { totalFiles, status: 'zipping' });
+        
+        logger.log('INFO', `ZIP job ${jobId}: Found ${totalFiles} files to compress`, req);
+        
+        // Create ZIP archive
+        const output = fsSync.createWriteStream(zipPath);
+        const archive = archiver('zip', { zlib: { level: 6 } }); // Balanced compression
+        
+        let filesProcessed = 0;
+        
+        // Track archive progress
+        archive.on('entry', (entry) => {
+            filesProcessed++;
+            const progress = Math.round((filesProcessed / totalFiles) * 100);
+            const currentFile = entry.name;
+            
+            zipTracker.updateJob(jobId, {
+                progress,
+                filesProcessed,
+                currentFile,
+                status: 'zipping'
+            });
+        });
+        
+        // Handle completion
+        output.on('close', () => {
+            zipTracker.updateJob(jobId, { 
+                zipPath, 
+                status: 'completed',
+                progress: 100,
+                currentFile: 'Completed'
+            });
+            logger.log('SUCCESS', `ZIP job ${jobId} completed: ${archive.pointer()} bytes`, req);
+        });
+        
+        // Handle errors
+        archive.on('error', (err) => {
+            zipTracker.errorJob(jobId, err);
+            logger.log('ERROR', `ZIP job ${jobId} failed`, req, err);
+        });
+        
+        output.on('error', (err) => {
+            zipTracker.errorJob(jobId, err);
+            logger.log('ERROR', `ZIP job ${jobId} output error`, req, err);
+        });
+        
+        // Pipe archive to output
+        archive.pipe(output);
+        
+        // Add directory to archive
+        archive.directory(folderPath, false);
+        
+        // Finalize archive
+        await archive.finalize();
+        
+    } catch (error) {
+        zipTracker.errorJob(jobId, error);
+        logger.log('ERROR', `ZIP job ${jobId} failed during setup`, req, error);
+    }
+}
 
 // API endpoint to get current directory info
 app.get('/api/info', (req, res) => {
@@ -422,12 +750,37 @@ app.get('/api/info', (req, res) => {
             basename: path.basename(fullCurrentPath) || path.basename(absoluteTargetDir)
         });
     } catch (error) {
+        logger.log('ERROR', 'Failed to get directory info', req, error);
         res.status(500).json({ error: error.message });
+    }
+});
+
+// API endpoint to view server logs
+app.get('/api/logs', (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 100;
+        const logs = logger.getRecentLogs(limit);
+        
+        logger.log('INFO', `Logs accessed: returning ${logs.length} entries`, req);
+        res.json({ logs });
+    } catch (error) {
+        logger.log('ERROR', 'Failed to retrieve logs', req, error);
+        res.status(500).json({ error: 'Failed to retrieve logs' });
     }
 });
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`File server running at http://localhost:${PORT}`);
-    console.log(`Serving directory: ${absoluteTargetDir}`);
+    const startMessage = `🚀 File server started on http://localhost:${PORT}`;
+    const dirMessage = `📁 Serving directory: ${absoluteTargetDir}`;
+    const logMessage = `📝 Logs available at: http://localhost:${PORT}/logs`;
+    
+    console.log('\x1b[32m%s\x1b[0m', '='.repeat(80));
+    console.log('\x1b[32m%s\x1b[0m', startMessage);
+    console.log('\x1b[36m%s\x1b[0m', dirMessage);
+    console.log('\x1b[36m%s\x1b[0m', logMessage);
+    console.log('\x1b[32m%s\x1b[0m', '='.repeat(80));
+    
+    logger.log('SYSTEM', `File server started successfully on port ${PORT}`);
+    logger.log('SYSTEM', `Serving directory: ${absoluteTargetDir}`);
 });

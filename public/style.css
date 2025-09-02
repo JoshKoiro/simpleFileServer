@@ -126,6 +126,17 @@ body {
     font-size: 1.3em;
 }
 
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    margin: 0;
+}
+
 .files-list {
     display: flex;
     flex-direction: column;
@@ -197,6 +208,219 @@ body {
 .action-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+/* Form Controls */
+.form-control {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
+    transition: border-color 0.2s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+/* ZIP Progress Modal Specific Styles */
+.zip-progress-content {
+    min-width: 500px;
+    max-width: 600px;
+}
+
+.zip-progress-container {
+    padding: 20px;
+}
+
+.zip-status {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 20px;
+}
+
+.progress-section {
+    margin: 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.zip-progress-bar {
+    flex: 1;
+    height: 12px;
+    background: #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.zip-progress-bar .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #28a745, #20c997);
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    font-weight: 500;
+    font-size: 16px;
+    color: #333;
+    min-width: 50px;
+    text-align: right;
+}
+
+.zip-details {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 20px 0;
+}
+
+.detail-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.detail-item:last-child {
+    margin-bottom: 0;
+}
+
+.detail-label {
+    color: #666;
+    font-size: 14px;
+}
+
+.detail-value {
+    color: #333;
+    font-weight: 500;
+    font-size: 14px;
+    text-align: right;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.zip-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+.zip-error {
+    text-align: center;
+    padding: 20px;
+    color: #dc3545;
+}
+
+.zip-error .error-icon {
+    font-size: 3em;
+    margin-bottom: 15px;
+}
+
+/* Log Viewer Modal Specific Styles */
+.log-viewer-content {
+    min-width: 80vw;
+    max-width: 90vw;
+    min-height: 70vh;
+    max-height: 90vh;
+}
+
+.log-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.log-container {
+    height: 60vh;
+    overflow-y: auto;
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.log-entry {
+    padding: 8px 0;
+    border-bottom: 1px solid #e0e0e0;
+    word-wrap: break-word;
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry.ERROR {
+    background: rgba(220, 53, 69, 0.1);
+    border-left: 4px solid #dc3545;
+    padding-left: 12px;
+}
+
+.log-entry.WARN {
+    background: rgba(255, 193, 7, 0.1);
+    border-left: 4px solid #ffc107;
+    padding-left: 12px;
+}
+
+.log-entry.SUCCESS {
+    background: rgba(40, 167, 69, 0.1);
+    border-left: 4px solid #28a745;
+    padding-left: 12px;
+}
+
+.log-entry.INFO {
+    background: rgba(23, 162, 184, 0.1);
+    border-left: 4px solid #17a2b8;
+    padding-left: 12px;
+}
+
+.log-entry.SYSTEM {
+    background: rgba(102, 126, 234, 0.1);
+    border-left: 4px solid #667eea;
+    padding-left: 12px;
+}
+
+.log-timestamp {
+    color: #666;
+    font-size: 12px;
+}
+
+.log-level {
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.log-level.ERROR { background: #dc3545; color: white; }
+.log-level.WARN { background: #ffc107; color: #333; }
+.log-level.SUCCESS { background: #28a745; color: white; }
+.log-level.INFO { background: #17a2b8; color: white; }
+.log-level.SYSTEM { background: #667eea; color: white; }
+
+.log-ip {
+    color: #6f42c1;
+    font-weight: 500;
+}
+
+.log-method {
+    color: #fd7e14;
+    font-weight: 500;
+}
+
+.log-message {
+    margin-left: 10px;
+    color: #333;
 }
 
 .action-btn.view-btn {

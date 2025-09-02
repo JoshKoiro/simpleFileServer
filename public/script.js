@@ -9,8 +9,8 @@ class FileServer {
         this.uploadStatus = document.getElementById('uploadStatus');
         this.uploadContent = document.querySelector('.upload-content');
         
-        // Modal elements
-        this.modal = document.getElementById('fileViewerModal');
+        // File viewer modal elements
+        this.fileViewerModal = document.getElementById('fileViewerModal');
         this.modalClose = document.getElementById('modalClose');
         this.modalTitle = document.getElementById('modalTitle');
         this.viewerContainer = document.getElementById('viewerContainer');
@@ -19,11 +19,40 @@ class FileServer {
         this.errorText = document.getElementById('errorText');
         this.downloadInsteadBtn = document.getElementById('downloadInsteadBtn');
         
+        // ZIP progress modal elements
+        this.zipProgressModal = document.getElementById('zipProgressModal');
+        this.zipModalClose = document.getElementById('zipModalClose');
+        this.zipModalTitle = document.getElementById('zipModalTitle');
+        this.zipStatus = document.getElementById('zipStatus');
+        this.zipProgressFill = document.getElementById('zipProgressFill');
+        this.zipProgressText = document.getElementById('zipProgressText');
+        this.zipCurrentFile = document.getElementById('zipCurrentFile');
+        this.zipFilesProgress = document.getElementById('zipFilesProgress');
+        this.zipElapsedTime = document.getElementById('zipElapsedTime');
+        this.zipActions = document.getElementById('zipActions');
+        this.downloadZipBtn = document.getElementById('downloadZipBtn');
+        this.zipCloseBtn = document.getElementById('zipCloseBtn');
+        this.zipError = document.getElementById('zipError');
+        this.zipErrorText = document.getElementById('zipErrorText');
+        
+        // Log viewer modal elements
+        this.logViewerModal = document.getElementById('logViewerModal');
+        this.logModalClose = document.getElementById('logModalClose');
+        this.logContainer = document.getElementById('logContainer');
+        this.logLevelFilter = document.getElementById('logLevelFilter');
+        this.refreshLogsBtn = document.getElementById('refreshLogsBtn');
+        this.viewLogsBtn = document.getElementById('viewLogsBtn');
+        
         // Navigation state
         this.currentPath = '';
         
         // Current viewed file info (for download fallback)
         this.currentViewedFile = null;
+        
+        // ZIP progress tracking
+        this.currentZipJobId = null;
+        this.zipProgressInterval = null;
+        this.zipStartTime = null;
         
         this.init();
     }
@@ -33,6 +62,8 @@ class FileServer {
         this.loadFiles();
         this.setupEventListeners();
         this.setupModalEventListeners();
+        this.setupZipModalEventListeners();
+        this.setupLogModalEventListeners();
     }
     
     setupEventListeners() {
@@ -72,25 +103,23 @@ class FileServer {
         // Prevent default drag behavior on document
         document.addEventListener('dragover', (e) => e.preventDefault());
         document.addEventListener('drop', (e) => e.preventDefault());
+        
+        // View logs button
+        this.viewLogsBtn.addEventListener('click', () => {
+            this.openLogViewer();
+        });
     }
     
     setupModalEventListeners() {
         // Close modal when clicking close button
         this.modalClose.addEventListener('click', () => {
-            this.closeModal();
+            this.closeFileViewerModal();
         });
         
         // Close modal when clicking outside content
-        this.modal.addEventListener('click', (e) => {
-            if (e.target === this.modal) {
-                this.closeModal();
-            }
-        });
-        
-        // Close modal with escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.modal.classList.contains('show')) {
-                this.closeModal();
+        this.fileViewerModal.addEventListener('click', (e) => {
+            if (e.target === this.fileViewerModal) {
+                this.closeFileViewerModal();
             }
         });
         
@@ -101,7 +130,69 @@ class FileServer {
                 link.href = `/api/download/${encodeURIComponent(this.currentViewedFile.name)}?path=${encodeURIComponent(this.currentPath)}`;
                 link.download = this.currentViewedFile.name;
                 link.click();
-                this.closeModal();
+                this.closeFileViewerModal();
+            }
+        });
+    }
+    
+    setupZipModalEventListeners() {
+        // Close ZIP modal
+        this.zipModalClose.addEventListener('click', () => {
+            this.closeZipModal();
+        });
+        
+        this.zipProgressModal.addEventListener('click', (e) => {
+            if (e.target === this.zipProgressModal) {
+                this.closeZipModal();
+            }
+        });
+        
+        // Download completed ZIP
+        this.downloadZipBtn.addEventListener('click', () => {
+            if (this.currentZipJobId) {
+                window.location.href = `/api/download-zip/${this.currentZipJobId}`;
+                setTimeout(() => this.closeZipModal(), 1000);
+            }
+        });
+        
+        // Close ZIP modal
+        this.zipCloseBtn.addEventListener('click', () => {
+            this.closeZipModal();
+        });
+    }
+    
+    setupLogModalEventListeners() {
+        // Close log modal
+        this.logModalClose.addEventListener('click', () => {
+            this.closeLogModal();
+        });
+        
+        this.logViewerModal.addEventListener('click', (e) => {
+            if (e.target === this.logViewerModal) {
+                this.closeLogModal();
+            }
+        });
+        
+        // Refresh logs
+        this.refreshLogsBtn.addEventListener('click', () => {
+            this.loadLogs();
+        });
+        
+        // Filter logs
+        this.logLevelFilter.addEventListener('change', () => {
+            this.filterLogs();
+        });
+        
+        // Close modals with escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (this.fileViewerModal.classList.contains('show')) {
+                    this.closeFileViewerModal();
+                } else if (this.zipProgressModal.classList.contains('show')) {
+                    this.closeZipModal();
+                } else if (this.logViewerModal.classList.contains('show')) {
+                    this.closeLogModal();
+                }
             }
         });
     }
@@ -165,7 +256,7 @@ class FileServer {
         } else if (file.isDirectory) {
             actions = `
                 <div class="file-actions">
-                    <button class="action-btn download-btn" onclick="window.fileServer.downloadFolder('${this.escapeHtml(file.name)}')">📦 Download ZIP</button>
+                    <button class="action-btn download-btn" onclick="window.fileServer.startZipDownload('${this.escapeHtml(file.name)}')">📦 Create ZIP</button>
                 </div>
             `;
             doubleClickHandler = `ondblclick="window.fileServer.navigateInto('${this.escapeHtml(file.name)}')"`;
@@ -232,7 +323,7 @@ class FileServer {
     // File viewing methods
     async viewFile(filename, viewerType) {
         this.currentViewedFile = { name: filename, viewerType };
-        this.openModal();
+        this.openFileViewerModal();
         this.showLoadingSpinner();
         this.modalTitle.textContent = filename;
         
@@ -386,14 +477,15 @@ class FileServer {
         }
     }
     
-    openModal() {
-        this.modal.classList.add('show');
-        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    // Modal management methods
+    openFileViewerModal() {
+        this.fileViewerModal.classList.add('show');
+        document.body.style.overflow = 'hidden';
     }
     
-    closeModal() {
-        this.modal.classList.remove('show');
-        document.body.style.overflow = ''; // Restore scrolling
+    closeFileViewerModal() {
+        this.fileViewerModal.classList.remove('show');
+        document.body.style.overflow = '';
         
         // Clean up viewer content
         this.viewerContainer.innerHTML = '';
@@ -424,6 +516,222 @@ class FileServer {
         this.errorMessage.style.display = 'none';
     }
     
+    // ZIP download methods
+    async startZipDownload(foldername) {
+        try {
+            this.openZipModal();
+            this.zipModalTitle.textContent = `Creating ZIP: ${foldername}`;
+            this.resetZipProgress();
+            
+            // Start ZIP job
+            const response = await fetch(`/api/start-zip/${encodeURIComponent(foldername)}?path=${encodeURIComponent(this.currentPath)}`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to start ZIP creation');
+            }
+            
+            const result = await response.json();
+            this.currentZipJobId = result.jobId;
+            this.zipStartTime = Date.now();
+            
+            // Start progress polling
+            this.startZipProgressPolling();
+            
+        } catch (error) {
+            console.error('ZIP creation error:', error);
+            this.showZipError(error.message);
+            this.showMessage(`Failed to create ZIP: ${error.message}`, 'error');
+        }
+    }
+    
+    startZipProgressPolling() {
+        this.zipProgressInterval = setInterval(async () => {
+            try {
+                const response = await fetch(`/api/zip-progress/${this.currentZipJobId}`);
+                if (!response.ok) {
+                    throw new Error('Failed to get progress');
+                }
+                
+                const progress = await response.json();
+                this.updateZipProgress(progress);
+                
+                // Stop polling if job is completed or errored
+                if (progress.status === 'completed' || progress.status === 'error') {
+                    clearInterval(this.zipProgressInterval);
+                    this.zipProgressInterval = null;
+                }
+                
+            } catch (error) {
+                console.error('Progress polling error:', error);
+                clearInterval(this.zipProgressInterval);
+                this.zipProgressInterval = null;
+                this.showZipError('Failed to get progress updates');
+            }
+        }, 1000); // Poll every second
+    }
+    
+    updateZipProgress(progress) {
+        // Update progress bar
+        this.zipProgressFill.style.width = `${progress.progress}%`;
+        this.zipProgressText.textContent = `${progress.progress}%`;
+        
+        // Update status
+        switch (progress.status) {
+            case 'counting':
+                this.zipStatus.textContent = 'Analyzing folder contents...';
+                break;
+            case 'zipping':
+                this.zipStatus.textContent = 'Creating ZIP archive...';
+                break;
+            case 'completed':
+                this.zipStatus.textContent = 'ZIP archive ready for download!';
+                this.zipActions.style.display = 'flex';
+                break;
+            case 'error':
+                this.showZipError(progress.error || 'An error occurred');
+                return;
+        }
+        
+        // Update details
+        this.zipCurrentFile.textContent = progress.currentFile || '—';
+        this.zipFilesProgress.textContent = `${progress.filesProcessed} / ${progress.totalFiles}`;
+        
+        // Update elapsed time
+        if (this.zipStartTime) {
+            const elapsed = Math.floor((Date.now() - this.zipStartTime) / 1000);
+            this.zipElapsedTime.textContent = this.formatElapsedTime(elapsed);
+        }
+    }
+    
+    formatElapsedTime(seconds) {
+        if (seconds < 60) {
+            return `${seconds}s`;
+        } else if (seconds < 3600) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes}m ${remainingSeconds}s`;
+        } else {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${minutes}m`;
+        }
+    }
+    
+    resetZipProgress() {
+        this.zipStatus.textContent = 'Initializing...';
+        this.zipProgressFill.style.width = '0%';
+        this.zipProgressText.textContent = '0%';
+        this.zipCurrentFile.textContent = '—';
+        this.zipFilesProgress.textContent = '0 / 0';
+        this.zipElapsedTime.textContent = '0s';
+        this.zipActions.style.display = 'none';
+        this.zipError.style.display = 'none';
+    }
+    
+    showZipError(message) {
+        this.zipError.style.display = 'block';
+        this.zipErrorText.textContent = message;
+        this.zipStatus.textContent = 'ZIP creation failed';
+    }
+    
+    openZipModal() {
+        this.zipProgressModal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+    
+    closeZipModal() {
+        this.zipProgressModal.classList.remove('show');
+        document.body.style.overflow = '';
+        
+        // Clean up
+        if (this.zipProgressInterval) {
+            clearInterval(this.zipProgressInterval);
+            this.zipProgressInterval = null;
+        }
+        this.currentZipJobId = null;
+        this.zipStartTime = null;
+    }
+    
+    // Log viewer methods
+    async openLogViewer() {
+        this.openLogModal();
+        await this.loadLogs();
+    }
+    
+    async loadLogs() {
+        try {
+            this.logContainer.innerHTML = '<div class="loading">Loading logs...</div>';
+            
+            const response = await fetch('/api/logs?limit=200');
+            if (!response.ok) {
+                throw new Error('Failed to load logs');
+            }
+            
+            const data = await response.json();
+            this.renderLogs(data.logs);
+            
+        } catch (error) {
+            console.error('Failed to load logs:', error);
+            this.logContainer.innerHTML = '<div class="loading">Failed to load logs</div>';
+        }
+    }
+    
+    renderLogs(logs) {
+        if (logs.length === 0) {
+            this.logContainer.innerHTML = '<div class="loading">No logs available</div>';
+            return;
+        }
+        
+        // Store logs for filtering
+        this.allLogs = logs;
+        this.filterLogs();
+    }
+    
+    filterLogs() {
+        if (!this.allLogs) return;
+        
+        const filterLevel = this.logLevelFilter.value;
+        const filteredLogs = filterLevel ? 
+            this.allLogs.filter(log => log.level === filterLevel) : 
+            this.allLogs;
+        
+        const logsHtml = filteredLogs.map(log => this.createLogEntry(log)).join('');
+        this.logContainer.innerHTML = logsHtml || '<div class="loading">No logs match the filter</div>';
+        
+        // Scroll to bottom
+        this.logContainer.scrollTop = this.logContainer.scrollHeight;
+    }
+    
+    createLogEntry(log) {
+        const timestamp = new Date(log.timestamp).toLocaleString();
+        const methodUrl = log.method && log.url ? `${log.method} ${log.url}` : '';
+        
+        return `
+            <div class="log-entry ${log.level}">
+                <span class="log-timestamp">${timestamp}</span>
+                <span class="log-level ${log.level}">${log.level}</span>
+                <span class="log-ip">${log.ip}</span>
+                ${methodUrl ? `<span class="log-method">${methodUrl}</span>` : ''}
+                <span class="log-message">${this.escapeHtml(log.message)}</span>
+                ${log.error ? `<div style="color: #dc3545; font-size: 12px; margin-top: 4px;">${this.escapeHtml(log.error.message)}</div>` : ''}
+            </div>
+        `;
+    }
+    
+    openLogModal() {
+        this.logViewerModal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+    
+    closeLogModal() {
+        this.logViewerModal.classList.remove('show');
+        document.body.style.overflow = '';
+    }
+    
+    // Upload methods
     async uploadFiles(files) {
         const formData = new FormData();
         
@@ -444,7 +752,7 @@ class FileServer {
             xhr.upload.addEventListener('progress', (e) => {
                 if (e.lengthComputable) {
                     const percentComplete = (e.loaded / e.total) * 100;
-                    this.updateProgress(percentComplete);
+                    this.updateUploadProgress(percentComplete);
                 }
             });
             
@@ -483,7 +791,7 @@ class FileServer {
     showUploadProgress() {
         this.uploadContent.style.display = 'none';
         this.uploadProgress.style.display = 'block';
-        this.updateProgress(0);
+        this.updateUploadProgress(0);
         this.uploadStatus.textContent = 'Uploading...';
     }
     
@@ -494,7 +802,7 @@ class FileServer {
         }, 1000);
     }
     
-    updateProgress(percent) {
+    updateUploadProgress(percent) {
         this.progressFill.style.width = percent + '%';
         
         if (percent >= 100) {
@@ -522,31 +830,6 @@ class FileServer {
             message.classList.remove('show');
             setTimeout(() => message.remove(), 300);
         }, 3000);
-    }
-    
-    async downloadFolder(foldername) {
-        try {
-            this.showMessage(`Preparing ZIP download for "${foldername}"...`, 'success');
-            
-            // Create a temporary link element for download
-            const link = document.createElement('a');
-            link.href = `/api/download-folder/${encodeURIComponent(foldername)}?path=${encodeURIComponent(this.currentPath)}`;
-            link.download = `${foldername}.zip`;
-            link.style.display = 'none';
-            
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            // Show success message after a short delay
-            setTimeout(() => {
-                this.showMessage(`Download started for "${foldername}.zip"`, 'success');
-            }, 1000);
-            
-        } catch (error) {
-            console.error('Folder download error:', error);
-            this.showMessage(`Failed to download folder: ${error.message}`, 'error');
-        }
     }
     
     // Navigation methods
